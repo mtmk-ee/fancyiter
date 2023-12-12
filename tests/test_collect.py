@@ -1,3 +1,5 @@
+import pytest
+
 from fancyiter import FancyIter
 
 

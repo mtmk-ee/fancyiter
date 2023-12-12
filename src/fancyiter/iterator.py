@@ -1,12 +1,11 @@
-import itertools
 import functools
+import itertools
 import typing
 
-from fancyiter._collect import extend
-from fancyiter._decorators import require_member_attr, chainable
-from fancyiter.exceptions import ItemNotFoundError
 from fancyiter import input_validation
-
+from fancyiter._collect import extend
+from fancyiter._decorators import chainable
+from fancyiter.exceptions import ItemNotFoundError
 
 T = typing.TypeVar("T")
 U = typing.TypeVar("U")
@@ -14,9 +13,34 @@ C = typing.TypeVar("C")
 
 
 class FancyIter(typing.Generic[T]):
+    """An iterable that wears a tophat and monoccle.
+
+    This class is a wrapper around an iterable that provides additional functionality.
+    It primarily offers chainable Rust-style iterables, lazy evaluation, and other useful
+    features. For some complex operations this class may offer a more readble representation
+    than the standard Python method.
+
+    For example:
+
+    >>> fancy_iter = FancyIter([1, 2, 3])
+    >>> fancy_iter.map(lambda x: x + 1).collect()
+    [2, 3, 4]
+
+    >>> fancy_iter.reduce(lambda x, y: x + y)
+    [6]
+    """
+
     __slots__ = ("_iterable",)
 
     def __init__(self, iterable: typing.Iterable[T]):
+        """Initialize the FancyIter.
+
+        Args:
+            iterable (typing.Iterable[T]): The iterable to wrap.
+
+        Raises:
+            TypeError: If the iterable is not actually iterable.
+        """
         input_validation.require_iterable(iterable)
         self._iterable = iterable
 
@@ -29,39 +53,33 @@ class FancyIter(typing.Generic[T]):
     def __str__(self) -> str:
         return str(self._iterable)
 
-    @require_member_attr("_iterable", "__len__")
-    def __len__(self) -> int:
-        return len(self._iterable)
-
-    @require_member_attr("_iterable", "__contains__")
-    def __contains__(self, item) -> bool:
-        return self._iterable.__contains__(item)
-
-    @require_member_attr("_iterable", "__getitem__")
-    def __getitem__(self, key):
-        return self._iterable[key]
-
-    def all(self, func: typing.Callable[[T], bool]) -> bool:
+    def all(self, func: typing.Callable[[T], bool] = None) -> bool:
         """Check if all elements in the iterable satisfy the given condition.
 
         Args:
-            func (callable): A function that takes an element from the iterable as input and returns a boolean value.
+            func (callable): A function that takes an element from the iterable as
+                its input and returns a boolean value.
 
         Returns:
             bool: True if all elements in the iterable satisfy the given condition.
         """
+        if func is None:
+            func = lambda x: bool(x)
         input_validation.require_callable(func)
         return all(func(x) for x in self._iterable)
 
-    def any(self, func: typing.Callable[[T], bool]) -> bool:
-        """Apply the given function to each element of the iterable and return True if any of the results are True.
+    def any(self, func: typing.Callable[[T], bool] = None) -> bool:
+        """Check if any of the elements in the iterable satisfy the given condition.
 
         Args:
-            func (typing.Callable[[T], bool]): The function to apply to each element of the iterable.
+            func (typing.Callable[[T], bool]): A function that takes an element from the iterable as'
+                its input and returns a boolean value.
 
         Returns:
             bool: True if any of the elements in the iterable satisfy the given condition.
         """
+        if func is None:
+            func = lambda x: bool(x)
         input_validation.require_callable(func)
         return any(func(x) for x in self._iterable)
 
@@ -146,10 +164,13 @@ class FancyIter(typing.Generic[T]):
         Returns:
             int: the number of items counted.
         """
-        if func is None:
-            return len(self._iterable)
+        it = self._iterable
+        if func is not None:
+            it = self.filter(func)._iterable
+        if hasattr(it, "__len__"):
+            return len(it)
         else:
-            return len(self.filter(func))
+            return sum(1 for _ in it)
 
     @chainable
     def cycle(self) -> "FancyIter[T]":
@@ -187,7 +208,7 @@ class FancyIter(typing.Generic[T]):
 
     @chainable
     def flatten(self) -> "FancyIter[T]":
-        return FancyIter(itertools.chain.from_iterable(self._iterable))
+        return FancyIter(_flatten_impl(self._iterable))
 
     def fold(self, initial: U, func: typing.Callable[[U, T], U]) -> U:
         return functools.reduce(func, self._iterable, initial)
@@ -200,6 +221,10 @@ class FancyIter(typing.Generic[T]):
     def fuse(self, stop_value: typing.Optional[T] = None) -> "FancyIter[T]":
         """Creates an iterator which stops at the first occurrence of `stop_value`."""
         return self.take_while(lambda x: x != stop_value)
+
+    @chainable
+    def insert(self, index: int, value: T) -> "FancyIter[T]":
+        return FancyIter(_insert_impl(self._iterable, value, index))
 
     @chainable
     def inspect(self, func: typing.Callable[[T], None]) -> "FancyIter[T]":
@@ -229,17 +254,29 @@ class FancyIter(typing.Generic[T]):
 
     def max(self, key: typing.Callable[[T], typing.Any] = None) -> T:
         if key is None:
-            return max(self._iterable)
+            try:
+                return max(self._iterable)
+            except ValueError:
+                raise ItemNotFoundError("Iterable is empty")
         else:
             input_validation.require_callable(key)
-            return max(self._iterable, key=key)
+            try:
+                return max(self._iterable, key=key)
+            except ValueError:
+                raise ItemNotFoundError("Iterable is empty")
 
     def min(self, key: typing.Callable[[T], typing.Any] = None) -> T:
         if key is None:
-            return min(self._iterable)
+            try:
+                return min(self._iterable)
+            except ValueError:
+                raise ItemNotFoundError("Iterable is empty")
         else:
             input_validation.require_callable(key)
-            return min(self._iterable, key=key)
+            try:
+                return min(self._iterable, key=key)
+            except ValueError:
+                raise ItemNotFoundError("Iterable is empty")
 
     def nth(self, n: int) -> T:
         """Get the nth item in the iterable.
@@ -249,6 +286,15 @@ class FancyIter(typing.Generic[T]):
         """
         input_validation.require_non_negative_integer(n)
         return self.enumerate().find(lambda x: x[0] == n)[1]
+
+    @chainable
+    def pairs(self) -> "FancyIter[typing.Tuple[T, T]]":
+        """Yields pairs of adjacent items in the iterable.
+
+        Yields:
+            tuple[T, T]: a tuple of adjacent items in the iterable.
+        """
+        return self.windows(2)
 
     def partition(
         self, func: typing.Callable[[T], bool]
@@ -318,7 +364,7 @@ class FancyIter(typing.Generic[T]):
 
     @chainable
     def windows(self, n: int) -> "FancyIter[typing.List[T]]":
-        input_validation.require_non_negative_integer(n)
+        input_validation.require_positive_integer(n)
         return FancyIter(_windows_impl(self._iterable, n))
 
     @chainable
@@ -333,39 +379,45 @@ class FancyIter(typing.Generic[T]):
             input_validation.require_iterable(it)
         return FancyIter(zip(self._iterable, *iterables))
 
-    @chainable
-    def zip_longest(
-        self,
-        *iterables: typing.Iterable[typing.Any],
-    ) -> "FancyIter[typing.Tuple[T, ...]]":
-        for it in iterables:
-            input_validation.require_iterable(it)
-        return FancyIter(itertools.zip_longest(self._iterable, *iterables))
-
 
 def _chunks_impl(iterable, n: int):
-    chunk = []
-    for item in iterable:
-        chunk.append(item)
-        if len(chunk) == n:
-            yield chunk
-            chunk = []
-    if chunk:
+    """Yield successive n-sized chunks from iterable."""
+    it = iter(iterable)
+    chunk = list(itertools.islice(it, n))
+    while chunk:
         yield chunk
+        chunk = list(itertools.islice(it, n))
+
+
+def _flatten_impl(iterable):
+    for item in iterable:
+        needs_flattening = False
+        if isinstance(item, typing.Iterable):
+            yield from item
+        else:
+            try:
+                iter(item)
+            except TypeError:
+                yield item
+            else:
+                yield from item
+
+
+def _insert_impl(iterable, value, index: int):
+    for i, x in enumerate(iterable):
+        if i == index:
+            yield value
+        yield x
 
 
 def _windows_impl(iterable, n: int):
     window = []
-    it = iter(iterable)
-    for _ in range(n - 1):
-        try:
-            window.append(next(it))
-        except StopIteration:
-            # if the iterable is shorter than n, then there's only one possible window
-            yield window
-            return
-
-    for item in it:
+    at_least_one = False
+    for item in iterable:
         window += [item]
-        yield window
-        window = window[1:]
+        if len(window) == n:
+            at_least_one = True
+            yield tuple(window)
+            window.pop(0)
+    if not at_least_one and len(window) != 0:
+        yield tuple(window)

@@ -131,7 +131,7 @@ class FancyIter(typing.Generic[T]):
         input_validation.require_callable(func)
         return func(self._iterable)
 
-    def collect_into(self, collection: typing.Collection[T]):
+    def collect_into(self, collection: typing.Collection[T]) -> typing.Collection[T]:
         """Collect all the items into an existing container.
 
         The container must be mutable and implement the interface of
@@ -139,9 +139,14 @@ class FancyIter(typing.Generic[T]):
 
         Args:
             collection: The container to collect the items into.
+
+        Returns:
+            The same collection given to this method. This gives the caller
+            the option to collect into a type other than a list by providing
+            an empty set, empty dict, etc.
         """
         input_validation.require_collection(collection)
-        extend(collection, self._iterable)
+        return extend(collection, self._iterable)
 
     def contains(self, item: T) -> bool:
         """Check if the iterable contains an item.

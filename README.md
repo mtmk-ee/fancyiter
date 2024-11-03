@@ -73,20 +73,16 @@ def _data_reader_impl(n_bytes: int) -> bytes:
 
 def _get_data(chunk_size: int, attempts: int = 5, timeout: float=0.2) -> Generator[bytes]:
     """Returns a generator that continually attempts to read data, and gives up after 5 failures."""
-    # the inner() function is used so that we can return a generator with bound arguments,
-    # rather than get_data(...) being a generator itself.
-    def inner():
-        while True:
-            for _ in range(attempts):
-                try:
-                    # recall: yield keyword turns this into a generator with lazy evaluation
-                    yield _data_reader_impl(n_bytes, timeout)
-                    break
-                except TimeoutError:
-                    continue
-            else:
-                raise TimeoutError(f"Read failed: timed out {attempts} times")
-    return inner
+    while True:
+        for _ in range(attempts):
+            try:
+                # recall: yield keyword turns this into a generator with lazy evaluation
+                yield _data_reader_impl(n_bytes, timeout)
+                break
+            except TimeoutError:
+                continue
+        else:
+            raise TimeoutError(f"Read failed: timed out {attempts} times")
 
 
 def create_pipeline(magic_seq: bytes):

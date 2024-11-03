@@ -1,11 +1,13 @@
 import functools
 import itertools
 import typing
+from concurrent.futures import ThreadPoolExecutor
 
 from fancyiter import input_validation
 from fancyiter._collect import extend
 from fancyiter._decorators import chainable
 from fancyiter.exceptions import ItemNotFoundError
+
 
 T = typing.TypeVar("T")
 U = typing.TypeVar("U")
@@ -52,6 +54,25 @@ class FancyIter(typing.Generic[T]):
 
     def __str__(self) -> str:
         return str(self._iterable)
+
+    @chainable
+    def par(
+        self,
+        *,
+        chunk_size: int = 5,
+        workers: int = None,
+        timeout: float = None,
+    ) -> "FancyIter[T]":
+        def inner():
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                yield from ex.map(
+                    lambda x: x,
+                    self._iterable,
+                    chunksize=chunk_size,
+                    timeout=timeout,
+                )
+
+        return FancyIter(inner)
 
     def all(self, func: typing.Callable[[T], bool] = None) -> bool:
         """Check if all elements in the iterable satisfy the given condition.
